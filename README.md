@@ -58,7 +58,9 @@
 
 在您的终端（命令行、PowerShell）中运行程序。
 
-#### 下载单个教材```bash
+#### 下载单个教材
+
+```bash
 # 通过 URL
 ./smartedu_downloader -u "https://basic.smartedu.cn/tchMaterial/detail?contentId=..."
 
@@ -104,7 +106,7 @@ cargo build --release
 
 ## 🤝 贡献
 
-欢迎任何形式的贡献！如果您有好的想法、功能建议或发现了 Bug，请随时提交 [Issues](https://github.com/<你的用户名>/<你的仓库名>/issues) 或 [Pull Requests](https://github.com/<你的用户名>/<你的仓库名>/pulls)。
+欢迎任何形式的贡献！如果您有好的想法、功能建议或发现了 Bug，请随时提交 [Issues](https://github.com/lss53/smartedu_downloader_cli/issues) 或 [Pull Requests](https://github.com/lss53/smartedu_downloader_cli/pulls)。
 
 ## 📝 许可 (License)
 
