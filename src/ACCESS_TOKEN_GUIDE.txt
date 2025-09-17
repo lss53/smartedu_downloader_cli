@@ -1,0 +1,25 @@
+获取 Access Token 指南
+
+[i] 本程序需要登录凭据 (Access Token) 才能下载教材。任选其一获取：
+
+方法一:
+1. 登录智慧教育平台 (https://auth.smartedu.cn/uias/login)。
+2. 按 F12 打开开发者工具，切换到“控制台” (Console)。
+3. 粘贴并运行以下代码：
+---------------------------------------------------------
+(function() {
+    const authKey = Object.keys(localStorage).find(key => key.startsWith("ND_UC_AUTH"));
+    if (!authKey) { console.error("未找到 Access Token，请确保已登录！"); return; }
+    const tokenData = JSON.parse(localStorage.getItem(authKey));
+    const accessToken = JSON.parse(tokenData.value).access_token;
+    console.log("%cAccess Token:", "color: green; font-weight: bold", accessToken);
+})();
+---------------------------------------------------------
+4. 复制控制台中绿色字体的 Access Token 即可。
+
+---------------------------------------------------------
+
+方法二:
+1. 登录任意教材页面，打开浏览器网络 (通常按 F12，然后切换到 网络 标签页)
+2. 刷新当前教材页面，在筛选框（Filter）中输入`mac`，单击过滤后的目标HTML。
+3. 复制右侧面板消息头中`MAC id`的值。
