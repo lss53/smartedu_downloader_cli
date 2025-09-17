@@ -19,12 +19,15 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             asset_name: smartedu_downloader-windows-x64.exe
+            source_name: smartedu_downloader.exe
           - target: x86_64-apple-darwin
             os: macos-latest
             asset_name: smartedu_downloader-macos-x64
+            source_name: smartedu_downloader
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             asset_name: smartedu_downloader-linux-x64
+            source_name: smartedu_downloader
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -55,7 +58,7 @@ jobs:
         run: |
           ARTIFACT_DIR="artifacts"
           mkdir -p $ARTIFACT_DIR
-          SOURCE_PATH=$(find target/${{ matrix.target }}/release -maxdepth 1 -type f -executable -name "smartedu_downloader*")
+          SOURCE_PATH="target/${{ matrix.target }}/release/${{ matrix.source_name }}"
           mv "$SOURCE_PATH" "$ARTIFACT_DIR/${{ matrix.asset_name }}"
 
       - name: Release
