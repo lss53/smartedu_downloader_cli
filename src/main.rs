@@ -133,13 +133,15 @@ struct Cli {
 // --- 5. 核心及辅助功能函数 ---
 
 fn get_content_id(input: &str) -> Option<String> {
-    if UUID_REGEX.is_match(input) { return Some(input.to_string()); }
-    if let Ok(url) = reqwest::Url::parse(input) {
-        return url.query_pairs().find_map(|(key, value)| {
+    if UUID_REGEX.is_match(input) {
+        Some(input.to_string())
+    } else if let Ok(url) = reqwest::Url::parse(input) {
+        url.query_pairs().find_map(|(key, value)| {
             (key == "contentId" && UUID_REGEX.is_match(&value)).then(|| value.into_owned())
-        });
+        })
+    } else {
+        None
     }
-    None
 }
 
 fn sanitize_filename(filename: &str) -> String {
@@ -163,14 +165,17 @@ async fn get_textbook_details(client: &Client, content_id: &str, access_token: &
     let data = client.get(&url).send().await?.error_for_status()?.json::<TextbookDetailsResponse>().await?;
     let source_item = data.ti_items.iter()
         .find(|item| item.ti_file_flag == "source" && item.ti_format == "pdf")
-        .ok_or_else(|| AppError::DetailFetch("未找到源PDF文件信息".to_string()))?;
+        .ok_or_else(|| AppError::DetailFetch(format!("在内容ID '{}' 中未找到源PDF文件信息", content_id)))?;
     let pdf_url_base = source_item.ti_storages.first()
-        .ok_or_else(|| AppError::DetailFetch("未找到PDF下载地址".to_string()))?;
+        .ok_or_else(|| AppError::DetailFetch(format!("在内容ID '{}' 中未找到PDF下载地址", content_id)))?;
     let is_pdf_pdf = pdf_url_base.to_lowercase().ends_with("pdf.pdf");
     let mut final_filename = if is_pdf_pdf {
         data.title.clone()
     } else {
-        Path::new(pdf_url_base).file_name().and_then(|n| n.to_str()).unwrap_or(content_id).to_string()
+        Path::new(pdf_url_base)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| content_id.to_string())
     };
     if !final_filename.to_lowercase().ends_with(".pdf") {
         final_filename.push_str(".pdf");
@@ -205,61 +210,77 @@ async fn download_file(client: &Client, info: &TextbookInfo, dest_path: &Path, m
     pb.set_style(PROGRESS_STYLE.clone());
     pb.set_message(info.filename.clone());
 
-    let mut last_error: Option<AppError> = None;
-    for attempt in 0..MAX_RETRIES {
-        if attempt > 0 {
-            let wait_time = Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt - 1));
-            pb.println(format!("{} '{}' 第{}次下载失败, {:.1?}后重试...", SYMBOL_WARNING, info.filename, attempt, wait_time));
-            tokio::time::sleep(wait_time).await;
-        }
-        pb.set_position(0);
+    // 将所有可能失败的逻辑放入一个 async 块中
+    let result: Result<DownloadStatus, AppError> = async {
+        let mut last_error: Option<AppError> = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let wait_time = Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt - 1));
+                pb.println(format!("{} '{}' 第{}次下载失败, {:.1?}后重试...", SYMBOL_WARNING, info.filename, attempt, wait_time));
+                tokio::time::sleep(wait_time).await;
+            }
+            pb.set_position(0);
 
-        match client.get(&info.download_url).send().await {
-            Ok(response) => match response.error_for_status() {
-                Ok(resp) => {
-                    let mut file = File::create(&dest_path).await?;
-                    let mut stream = resp.bytes_stream();
-                    while let Some(chunk_result) = stream.next().await {
-                        let chunk = chunk_result?;
-                        file.write_all(&chunk).await?;
-                        pb.inc(chunk.len() as u64);
-                    }
-                    file.flush().await?;
-                    
-                    pb.set_style(FINISHED_STYLE.clone());
+            let response_result = client.get(&info.download_url).send().await;
 
-                    return match validate_local_file(dest_path, info).await? {
-                        DownloadStatus::Success => {
-                            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_SUCCESS.green(), info.filename, "校验通过".green()));
-                            Ok(DownloadStatus::Success)
-                        },
-                        DownloadStatus::SuccessNoValidation => {
-                            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_WARNING.yellow(), info.filename, "无校验信息".yellow()));
-                            Ok(DownloadStatus::SuccessNoValidation)
-                        },
-                        status => {
-                            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_ERROR.red(), info.filename, "校验失败".red()));
-                            Ok(status)
+            match response_result {
+                Ok(response) => match response.error_for_status() {
+                    Ok(resp) => {
+                        let mut file = File::create(&dest_path).await?;
+                        let mut stream = resp.bytes_stream();
+                        while let Some(chunk_result) = stream.next().await {
+                            let chunk = chunk_result?;
+                            file.write_all(&chunk).await?;
+                            pb.inc(chunk.len() as u64);
                         }
-                    };
-                }
-                Err(e) => {
-                    if e.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
-                        pb.set_style(FINISHED_STYLE.clone());
-                        pb.finish_with_message(format!("{} '{}' {}", SYMBOL_ERROR.red(), info.filename, "Token错误或过期".red()));
-                        return Ok(DownloadStatus::TokenError);
+                        file.flush().await?;
+                        
+                        // 下载成功，直接返回校验结果
+                        return validate_local_file(dest_path, info).await;
                     }
+                    Err(e) => {
+                        // HTTP 状态码错误 (e.g., 404, 500)
+                        if e.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
+                            // 这是个不可重试的致命错误，直接返回
+                            return Ok(DownloadStatus::TokenError);
+                        }
+                        last_error = Some(e.into());
+                    }
+                },
+                Err(e) => {
+                    // 网络层错误 (e.g., DNS, TCP)
                     last_error = Some(e.into());
                 }
-            },
-            Err(e) => last_error = Some(e.into()),
+            }
+        }
+        // 如果循环结束仍然失败，返回最后一次的错误
+        Err(last_error.unwrap_or(AppError::DetailFetch("未知下载错误".into())))
+    }.await;
+
+    // 在外部统一处理结果，并确保进度条被终结
+    pb.set_style(FINISHED_STYLE.clone());
+    match result {
+        Ok(DownloadStatus::Success) => {
+            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_SUCCESS.green(), info.filename, "校验通过".green()));
+            Ok(DownloadStatus::Success)
+        }
+        Ok(DownloadStatus::SuccessNoValidation) => {
+            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_WARNING.yellow(), info.filename, "无校验信息".yellow()));
+            Ok(DownloadStatus::SuccessNoValidation)
+        }
+        Ok(DownloadStatus::TokenError) => {
+            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_ERROR.red(), info.filename, "Token错误或过期".red()));
+            Ok(DownloadStatus::TokenError)
+        }
+        Ok(status) => { // 其他校验失败的状态
+            pb.finish_with_message(format!("{} '{}' {}", SYMBOL_ERROR.red(), info.filename, "校验失败".red()));
+            Ok(status)
+        }
+        Err(e) => { // 所有在 async 块中发生的 I/O 错误或重试耗尽后的网络错误
+            pb.finish_with_message(format!("{} '{}' {}: {}", SYMBOL_ERROR.red(), info.filename, "下载失败".red(), e));
+            Ok(DownloadStatus::NetworkError) // 将所有最终错误归类为网络错误
         }
     }
-    
-    let final_err = last_error.unwrap_or(AppError::DetailFetch("未知下载错误".into()));
-    pb.set_style(FINISHED_STYLE.clone());
-    pb.finish_with_message(format!("{} '{}' {}: {}", SYMBOL_ERROR.red(), info.filename, "下载失败".red(), final_err));
-    Ok(DownloadStatus::NetworkError)
 }
 
 async fn process_single_task(client: Arc<Client>, args: Arc<Cli>, item_data: (String, String), dest_folder: Arc<PathBuf>, mp: Arc<MultiProgress>) -> (String, String, DownloadStatus) {
@@ -273,13 +294,23 @@ async fn process_single_task(client: Arc<Client>, args: Arc<Cli>, item_data: (St
         Ok(d) => d,
         Err(e) => {
             // 对于非下载阶段的错误，使用log打印，不干扰进度条
-            error!("{} 获取'{}'详情失败: {}", SYMBOL_ERROR, original_input, e);
+            error!("{} 获取'{}' (ID: {}) 详情失败: {}", SYMBOL_ERROR, original_input, content_id, e);
             return (original_input, String::new(), DownloadStatus::FailGetDetails);
         }
     };
     let is_batch = args.url.len() + args.content_id.len() > 1 || args.input_file.is_some();
-    let final_filename = if !is_batch && args.output.as_ref().map_or(false, |o| !o.ends_with('/') && !o.ends_with('\\')) {
-        Path::new(args.output.as_ref().unwrap()).file_name().unwrap().to_string_lossy().to_string()
+    let final_filename = if !is_batch {
+        if let Some(output) = &args.output {
+            let output_path = Path::new(output);
+            // 检查 output 参数是否看起来像一个文件名
+            if !output.ends_with('/') && !output.ends_with('\\') && output_path.file_name().is_some() {
+                output_path.file_name().unwrap().to_string_lossy().to_string()
+            } else {
+                details.filename.clone()
+            }
+        } else {
+            details.filename.clone()
+        }
     } else {
         details.filename.clone()
     };
@@ -300,7 +331,7 @@ async fn process_single_task(client: Arc<Client>, args: Arc<Cli>, item_data: (St
     match download_file(&client, &details, &full_output_path, mp).await {
         Ok(status) => (original_input, final_filename, status),
         Err(e) => {
-            error!("下载'{}'时发生意外错误: {}", final_filename, e);
+            error!("下载'{}' (ID: {}) 时发生意外错误: {}", final_filename, content_id, e);
             (original_input, final_filename, DownloadStatus::UnexpectedError)
         }
     }
@@ -310,30 +341,69 @@ fn print_token_guide() {
     let content = include_str!("ACCESS_TOKEN_GUIDE.txt");
     let lines: Vec<&str> = content.lines().collect();
     let divider = SYMBOL_DIVIDER.repeat(60);
-    println!("\n{}", divider.blue());
+    
+    println!("\n{}", divider.blue().bold());
+    
+    // 打印标题行
     if let Some(first_line) = lines.first() {
         println!("  {}", first_line.bold().yellow());
     }
+    
     let mut in_code_block = false;
-    let mut next_divider_is_code = false;
+    
     for line in lines.iter().skip(1) {
         if in_code_block {
-            if line.starts_with("----") { in_code_block = false; println!("  {}", line.blue()); } 
-            else { println!("  {}", line.cyan()); }
+            // 代码块结束标记 - 不显示
+            if line.starts_with("```") {
+                in_code_block = false;
+                continue;
+            } else {
+                // 代码块内容
+                println!("  {}", line.cyan());
+            }
             continue;
         }
-        if next_divider_is_code && line.starts_with("----") {
+        
+        // 检测代码块开始 - 不显示
+        if line.starts_with("```javascript") {
             in_code_block = true;
-            next_divider_is_code = false;
-            println!("  {}", line.blue());
             continue;
         }
-        if line.starts_with("方法一") || line.starts_with("方法二") { println!("\n  {}", line.bold().green()); } 
-        else if line.starts_with("----") { println!("  {}", line.blue()); } 
-        else { println!("  {}", line); }
-        if line.contains("粘贴并运行以下代码") { next_divider_is_code = true; }
+        
+        // 处理URL链接 - 精确地只给URL部分添加下划线
+        if let Some(url_start) = line.find("https://") {
+            // 从 URL 开始的部分切片
+            let url_and_after = &line[url_start..];
+            
+            // 查找 URL 的结束位置。这里我们定义为遇到空格或右括号就结束。
+            // 如果没找到，就认为 URL 一直持续到行尾。
+            let url_end_offset = url_and_after.find(|c| c == ' ' || c == ')')
+                .unwrap_or(url_and_after.len());
+
+            // 将行分割成三部分：URL前，URL本身，URL后
+            let before_url = &line[..url_start];
+            let url_part = &url_and_after[..url_end_offset];
+            let after_url = &url_and_after[url_end_offset..];
+
+            println!("  {}{}{}", before_url, url_part.purple().underline(), after_url);
+            continue;
+        }
+        
+        // 处理步骤编号
+        if line.starts_with(|c: char| c.is_ascii_digit() && line.contains('.')) {
+            println!("  {}", line.bold().green());
+        } 
+        // 处理子项目符号
+        else if line.trim_start().starts_with('-') {
+            println!("  {}", line.dimmed());
+        }
+        // 普通文本
+        else {
+            println!("  {}", line);
+        }
     }
-    println!("{}", divider.blue());
+    
+    println!("{}", divider.blue().bold());
 }
 
 fn read_input_file(path: &Path) -> Result<Vec<String>, AppError> {
@@ -381,7 +451,7 @@ async fn determine_output_dir(cli: &Cli, is_batch: bool) -> Result<PathBuf, AppE
         output_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
     };
     fs::create_dir_all(&dest_folder).await.map_err(|e| AppError::DirCreation(e.to_string()))?;
-    info!("文件将保存到目录: '{:?}'", dest_folder);
+    info!("文件将保存到目录: '{}'", dest_folder.display());
     Ok(dest_folder)
 }
 
@@ -422,10 +492,17 @@ fn process_download_results(results: Vec<Result<(String, String, DownloadStatus)
         match res {
             Ok((original, filename, status)) => {
                 *stats.entry(status).or_insert(0) += 1;
-                if status == DownloadStatus::Skipped { skipped_details.push(format!("'{}'", filename)); }
-                if !matches!(status, DownloadStatus::Success | DownloadStatus::SuccessNoValidation | DownloadStatus::Skipped) {
-                    let reason = format!("{:?}", status);
-                    failed_details.push(format!("'{}': {}", original, reason));
+                match status {
+                    DownloadStatus::Skipped => {
+                        skipped_details.push(format!("'{}'", filename));
+                    }
+                    DownloadStatus::Success | DownloadStatus::SuccessNoValidation => {
+                        // 成功状态，这里不需要额外操作
+                    }
+                    _ => { // 捕获所有其他失败状态
+                        let reason = format!("{:?}", status);
+                        failed_details.push(format!("'{}': {}", original, reason));
+                    }
                 }
             }
             Err(e) => { 
@@ -492,11 +569,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tasks = Vec::new();
     
     for item in download_items {
-        let permit = Arc::clone(&semaphore).acquire_owned().await?;
-        let (client, args, dest, mp) = (Arc::clone(&client), Arc::clone(&final_args), Arc::clone(&dest_folder), Arc::clone(&multi_progress));
+        let permit = semaphore.clone().acquire_owned().await?;
+        let client = client.clone();
+        let args = final_args.clone();
+        let dest = dest_folder.clone();
+        let mp = multi_progress.clone();
+        
         tasks.push(tokio::spawn(async move {
             let result = process_single_task(client, args, item, dest, mp).await;
-            drop(permit);
+            drop(permit); // 明确释放信号量许可
             result
         }));
     }

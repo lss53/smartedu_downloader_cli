@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/lss53/smartedu_downloader_cli/actions/workflows/release.yml">
-        <img src="https://github.com/lss53/smartedu_downloader_cli/actions/workflows/release.yml/badge.svg" alt="Build Status">
+    <a href="https://github.com/lss53/sed-dl/actions/workflows/release.yml">
+        <img src="https://github.com/lss53/sed-dl/actions/workflows/release.yml/badge.svg" alt="Build Status">
     </a>
-    <a href="https://github.com/lss53/smartedu_downloader_cli/releases/latest">
-        <img src="https://img.shields.io/github/v/release/lss53/smartedu_downloader_cli" alt="Latest Release">
+    <a href="https://github.com/lss53/sed-dl/releases/latest">
+        <img src="https://img.shields.io/github/v/release/lss53/sed-dl" alt="Latest Release">
     </a>
     <a href="https://opensource.org/licenses/MIT">
         <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
@@ -36,7 +36,7 @@
 
 ### 1. 下载预编译的可执行文件
 
-最简单的使用方式是直接从 [Releases 页面](https://github.com/lss53/smartedu_downloader_cli/releases/latest) 下载。
+最简单的使用方式是直接从 [Releases 页面](https://github.com/lss53/sed-dl/releases/latest) 下载。
 
 1.  访问最新的 Release 页面。
 2.  根据您的操作系统，下载对应的文件：
@@ -106,7 +106,7 @@ cargo build --release
 
 ## 🤝 贡献
 
-欢迎任何形式的贡献！如果您有好的想法、功能建议或发现了 Bug，请随时提交 [Issues](https://github.com/lss53/smartedu_downloader_cli/issues) 或 [Pull Requests](https://github.com/lss53/smartedu_downloader_cli/pulls)。
+欢迎任何形式的贡献！如果您有好的想法、功能建议或发现了 Bug，请随时提交 [Issues](https://github.com/lss53/sed-dl/issues) 或 [Pull Requests](https://github.com/lss53/sed-dl/pulls)。
 
 ## 📝 许可 (License)
 

@@ -1,25 +1,24 @@
-获取 Access Token 指南
-
-[i] 本程序需要登录凭据 (Access Token) 才能下载教材。任选其一获取：
-
-方法一:
-1. 登录智慧教育平台 (https://auth.smartedu.cn/uias/login)。
-2. 按 F12 打开开发者工具，切换到“控制台” (Console)。
-3. 粘贴并运行以下代码：
----------------------------------------------------------
-(function() {
-    const authKey = Object.keys(localStorage).find(key => key.startsWith("ND_UC_AUTH"));
-    if (!authKey) { console.error("未找到 Access Token，请确保已登录！"); return; }
-    const tokenData = JSON.parse(localStorage.getItem(authKey));
-    const accessToken = JSON.parse(tokenData.value).access_token;
-    console.log("%cAccess Token:", "color: green; font-weight: bold", accessToken);
-})();
----------------------------------------------------------
-4. 复制控制台中绿色字体的 Access Token 即可。
-
----------------------------------------------------------
-
-方法二:
-1. 登录任意教材页面，打开浏览器网络 (通常按 F12，然后切换到 网络 标签页)
-2. 刷新当前教材页面，在筛选框（Filter）中输入`mac`，单击过滤后的目标HTML。
-3. 复制右侧面板消息头中`MAC id`的值。
+[i] 获取 Access Token 指南
+本程序需要登录凭据 (Access Token) 才能下载教材。
+1. 使用 Chrome / Edge / Firefox 浏览器登录智慧教育平台。
+   (登录地址: https://auth.smartedu.cn/uias/login)
+2. 登录后，打开“开发者工具”。
+   - 在 Windows / Linux 上: 按 F12 或 Ctrl+Shift+I
+   - 在 macOS 上: 按 Cmd+Opt+I (⌘⌥I)
+3. 在开发者工具中，切换到“控制台” (Console) 标签页。
+4. 将以下代码完整复制并粘贴到控制台中，然后按 Enter 键运行：
+```javascript
+copy(
+  JSON.parse(
+    JSON.parse(
+      localStorage.getItem(
+        Object.keys(localStorage).find(
+          i => i.startsWith("ND_UC_AUTH")
+        )
+      )
+    ).value
+  ).access_token
+)
+```
+5. 您的 Access Token 此时已被自动复制到剪贴板，可以直接粘贴使用。
+   (如果提示 "copy is not defined"，请手动复制打印出的 Token 字符串)

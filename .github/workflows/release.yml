@@ -18,21 +18,33 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            asset_name: smartedu_downloader-windows-x64.exe
-            source_name: smartedu_downloader.exe
+            asset_name: sed-dl-win-x64.zip
+            source_name: sed-dl.exe
           - target: x86_64-apple-darwin
             os: macos-latest
-            asset_name: smartedu_downloader-macos-x64
-            source_name: smartedu_downloader
+            asset_name: sed-dl-macos-x64.tar.gz
+            source_name: sed-dl
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            asset_name: smartedu_downloader-linux-x64
-            source_name: smartedu_downloader
+            asset_name: sed-dl-linux-x64.tar.gz
+            source_name: sed-dl
 
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install musl-tools for Linux static build
         if: matrix.os == 'ubuntu-latest'
@@ -53,13 +65,21 @@ jobs:
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Prepare artifact
+      - name: Package artifact
         shell: bash
         run: |
           ARTIFACT_DIR="artifacts"
           mkdir -p $ARTIFACT_DIR
+          
           SOURCE_PATH="target/${{ matrix.target }}/release/${{ matrix.source_name }}"
-          mv "$SOURCE_PATH" "$ARTIFACT_DIR/${{ matrix.asset_name }}"
+          DEST_ARCHIVE="$ARTIFACT_DIR/${{ matrix.asset_name }}"
+          
+          # 根据操作系统选择不同的压缩方式
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a "$DEST_ARCHIVE" "$SOURCE_PATH"
+          else
+            tar -czf "$DEST_ARCHIVE" -C "target/${{ matrix.target }}/release" "${{ matrix.source_name }}"
+          fi
 
       - name: Release
         uses: softprops/action-gh-release@v2
