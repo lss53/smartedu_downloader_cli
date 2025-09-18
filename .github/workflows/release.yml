@@ -100,6 +100,7 @@ jobs:
           echo 'rustflags = ["-C", "target-feature=+crt-static"]' >> .cargo/config.toml
       
       - name: Run tests
+        shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
             cross test --release --target ${{ matrix.target }} --locked
@@ -108,6 +109,7 @@ jobs:
           fi
       
       - name: Build binary
+        shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
             cross build --release --target ${{ matrix.target }} --locked
@@ -123,8 +125,16 @@ jobs:
           echo "source_name=$SOURCE_NAME" >> $GITHUB_OUTPUT
           SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME"
           echo "source_path=$SOURCE_PATH" >> $GITHUB_OUTPUT
+          
+          echo "Stripping binary..."
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
-            strip "$SOURCE_PATH"
+            if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+              # 使用交叉编译工具链中的 strip
+              aarch64-linux-musl-strip "$SOURCE_PATH"
+            else
+              # 使用系统原生的 strip
+              strip "$SOURCE_PATH"
+            fi
           fi
 
       - name: Package artifact and generate checksum
