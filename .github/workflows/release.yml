@@ -9,26 +9,40 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Release
+  # Job 1: 创建一个草稿 Release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Draft Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 设置为 true 来创建一个草稿，这样在文件上传完成前它都不可见
+          draft: true
+          # 在这个 Job 中生成发行说明
+          generate_release_notes: true
+
+  # Job 2: 构建并上传所有平台的产物
+  build-and-upload:
+    name: Build and Upload
+    # 这个 Job 依赖于 create-release Job 的成功
+    needs: create-release
     strategy:
       matrix:
         include:
-          # Windows x64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             source_name: sed-dl.exe
             os_name: Windows
             arch: x64
             ext: .zip
-          # macOS x64
           - target: x86_64-apple-darwin
             os: macos-latest
             source_name: sed-dl
             os_name: macOS
             arch: x64
             ext: .tar.gz
-          # Linux x64 (static MUSL build)
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             source_name: sed-dl
@@ -62,42 +76,39 @@ jobs:
 
       - name: Package artifact
         shell: bash
-        # 将 github.ref_name (tag) 传入 shell 环境
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
-          # 准备目录和动态文件名
           ARTIFACT_DIR="artifacts"
           mkdir -p $ARTIFACT_DIR
-          
-          # 从 tag (例如 v0.1.0) 中提取版本号 (0.1.0)
           VERSION=${GITHUB_REF_NAME#v}
-          
-          # 动态构建压缩包文件名
           DEST_ARCHIVE_NAME="sed-dl_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
           DEST_ARCHIVE_PATH="$ARTIFACT_DIR/$DEST_ARCHIVE_NAME"
-          
-          # 定义源文件所在的目录
           SOURCE_DIR="target/${{ matrix.target }}/release"
 
-          echo "Packaging for ${{ matrix.os_name }}..."
-          echo "  Source directory: $SOURCE_DIR"
-          echo "  Source file: ${{ matrix.source_name }}"
-          echo "  Destination archive: $DEST_ARCHIVE_PATH"
-
-          # 根据操作系统选择不同的压缩方式
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            # 对于 Windows (7z), 我们需要先进入源目录再压缩，以避免包含父文件夹
             pushd $SOURCE_DIR
             7z a "../../../$DEST_ARCHIVE_PATH" "${{ matrix.source_name }}"
             popd
           else
-            # 对于 Linux/macOS (tar), 可以使用 -C 参数指定源目录，非常方便
             tar -czf "$DEST_ARCHIVE_PATH" -C "$SOURCE_DIR" "${{ matrix.source_name }}"
           fi
 
-      - name: Release
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
+          # 将打包好的文件上传到之前创建的草稿 Release
           files: artifacts/*
-          generate_release_notes: true
+
+  # Job 3: 在所有产物上传后，正式发布 Release
+  publish-release:
+    name: Publish Release
+    # 这个 Job 依赖于 build-and-upload Job 的成功
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 将 draft 标志设置为 false 来正式发布它
+          draft: false
