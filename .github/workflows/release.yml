@@ -76,7 +76,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Show cache status
-        run: echo "Cache hit: ${{ steps.cargo-cache.outputs.cache-hit }}"
+        run: 'echo "Cache hit: ${{ steps.cargo-cache.outputs.cache-hit }}"'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
