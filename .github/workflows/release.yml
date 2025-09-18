@@ -1,3 +1,5 @@
+# 文件路径: .github/workflows/release.yml
+
 name: Release CI
 
 on:
@@ -87,34 +89,47 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo install cross --git https://github.com/cross-rs/cross --branch main
 
-      - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
+      - name: Install build dependencies for x86_64-musl (Linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      
+      - name: Install aarch64-musl toolchain
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          set -e
+          TOOLCHAIN_URL="https://musl.cc/aarch64-linux-musl-cross.tgz"
+          echo "Downloading toolchain from $TOOLCHAIN_URL"
+          curl -L -o aarch64-linux-musl-cross.tgz "$TOOLCHAIN_URL"
+          tar -xzf aarch64-linux-musl-cross.tgz
+          echo "Adding $(pwd)/aarch64-linux-musl-cross/bin to GITHUB_PATH"
+          echo "$(pwd)/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
 
-      - name: Configure musl linker (Linux)
-        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
+      - name: Configure musl linker for x86_64-musl (Linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           mkdir -p .cargo
-          echo '[target.${{ matrix.target }}]' > .cargo/config.toml
-          echo 'linker = "${{ matrix.target }}-gcc"' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "target-feature=+crt-static"]' >> .cargo/config.toml
-      
+          cat << EOF > .cargo/config.toml
+          [target.x86_64-unknown-linux-musl]
+          linker = "x86_64-linux-musl-gcc"
+          rustflags = ["-C", "target-feature=+crt-static"]
+          EOF
+
       - name: Run tests
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            cross test --release --target ${{ matrix.target }} --locked
+            cross test --release --target ${{ matrix.target }}
           else
-            cargo test --release --target ${{ matrix.target }} --locked
+            cargo test --release --target ${{ matrix.target }}
           fi
       
       - name: Build binary
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            cross build --release --target ${{ matrix.target }} --locked
+            cross build --release --target ${{ matrix.target }}
           else
-            cargo build --release --target ${{ matrix.target }} --locked
+            cargo build --release --target ${{ matrix.target }}
           fi
 
       - name: Prepare binary for packaging
