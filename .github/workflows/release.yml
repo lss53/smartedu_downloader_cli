@@ -78,9 +78,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Show cache status
-        run: 'echo "Cache hit: ${{ steps.cargo-cache.outputs.cache-hit }}"'
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -94,21 +91,30 @@ jobs:
         if: runner.os == 'Linux' && contains(matrix.target, 'musl')
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools musl-dev
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            sudo apt-get install -y gcc-aarch64-linux-musl
+            sudo apt-get install -y gcc-aarch64-linux-gnu
           fi
 
       - name: Configure MUSL linker for Linux
         if: runner.os == 'Linux' && contains(matrix.target, 'musl')
         run: |
           mkdir -p .cargo
+          # For x86_64, the linker provided by musl-tools is 'musl-gcc'
+          LINKER_NAME="musl-gcc"
+          # For aarch64, the wrapper script is 'aarch64-linux-musl-gcc'
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            LINKER_NAME="aarch64-linux-musl-gcc"
+          fi
+
           cat << EOF > .cargo/config.toml
           [target.${{ matrix.target }}]
-          linker = "${{ matrix.target }}-gcc"
+          linker = "$LINKER_NAME"
           rustflags = ["-C", "target-feature=+crt-static"]
           EOF
-
+          
+          echo "Using linker for ${{ matrix.target }}: $LINKER_NAME"
+          
       - name: Run tests
         shell: bash
         run: |
@@ -138,11 +144,11 @@ jobs:
 
           echo "Stripping binary..."
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+            STRIP_COMMAND="strip"
             if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-              aarch64-linux-musl-strip "$SOURCE_PATH"
-            else
-              strip "$SOURCE_PATH"
+              STRIP_COMMAND="aarch64-linux-musl-strip"
             fi
+            "$STRIP_COMMAND" "$SOURCE_PATH"
           fi
 
       - name: Package artifact and generate checksum
@@ -156,14 +162,12 @@ jobs:
           DEST_ARCHIVE_NAME="${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
           DEST_ARCHIVE_PATH="${{ env.ARTIFACT_DIR }}/$DEST_ARCHIVE_NAME"
           
-          echo "Packaging $SOURCE_NAME for ${{ matrix.os_name }}..."
           if [[ "${{ matrix.ext }}" == ".zip" ]]; then
             tar -acf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           else
             tar -czf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           fi
           
-          echo "Generating checksum..."
           cd ${{ env.ARTIFACT_DIR }}
           sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha256"
           cd ..
