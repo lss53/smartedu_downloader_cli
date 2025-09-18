@@ -19,7 +19,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
-      releases: write
+      contents: write
       pull-requests: read
     outputs:
       release_id: ${{ steps.create_release.outputs.id }}
@@ -196,7 +196,7 @@ jobs:
     needs: [create-release, build-and-upload]
     runs-on: ubuntu-latest
     permissions:
-      releases: write
+      contents: write
     steps:
       - name: Publish the Release
         uses: softprops/action-gh-release@v2
