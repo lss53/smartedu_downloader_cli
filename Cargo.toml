@@ -1,5 +1,5 @@
 [package]
-name = "smartedu_downloader_cli"
+name = "sed-dl"
 version = "0.1.0"
 edition = "2024"
 
