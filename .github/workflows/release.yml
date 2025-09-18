@@ -1,5 +1,3 @@
-# .github/workflows/release.yml
-
 name: Release CI
 
 on:
@@ -16,35 +14,32 @@ jobs:
     strategy:
       matrix:
         include:
+          # Windows x64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            asset_name: sed-dl-win-x64.zip
             source_name: sed-dl.exe
+            os_name: Windows
+            arch: x64
+            ext: .zip
+          # macOS x64
           - target: x86_64-apple-darwin
             os: macos-latest
-            asset_name: sed-dl-macos-x64.tar.gz
             source_name: sed-dl
+            os_name: macOS
+            arch: x64
+            ext: .tar.gz
+          # Linux x64 (static MUSL build)
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            asset_name: sed-dl-linux-x64.tar.gz
             source_name: sed-dl
+            os_name: Linux
+            arch: x64
+            ext: .tar.gz
 
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install musl-tools for Linux static build
         if: matrix.os == 'ubuntu-latest'
@@ -67,18 +62,38 @@ jobs:
 
       - name: Package artifact
         shell: bash
+        # 将 github.ref_name (tag) 传入 shell 环境
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
+          # 准备目录和动态文件名
           ARTIFACT_DIR="artifacts"
           mkdir -p $ARTIFACT_DIR
           
-          SOURCE_PATH="target/${{ matrix.target }}/release/${{ matrix.source_name }}"
-          DEST_ARCHIVE="$ARTIFACT_DIR/${{ matrix.asset_name }}"
+          # 从 tag (例如 v0.1.0) 中提取版本号 (0.1.0)
+          VERSION=${GITHUB_REF_NAME#v}
           
+          # 动态构建压缩包文件名
+          DEST_ARCHIVE_NAME="sed-dl_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
+          DEST_ARCHIVE_PATH="$ARTIFACT_DIR/$DEST_ARCHIVE_NAME"
+          
+          # 定义源文件所在的目录
+          SOURCE_DIR="target/${{ matrix.target }}/release"
+
+          echo "Packaging for ${{ matrix.os_name }}..."
+          echo "  Source directory: $SOURCE_DIR"
+          echo "  Source file: ${{ matrix.source_name }}"
+          echo "  Destination archive: $DEST_ARCHIVE_PATH"
+
           # 根据操作系统选择不同的压缩方式
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a "$DEST_ARCHIVE" "$SOURCE_PATH"
+            # 对于 Windows (7z), 我们需要先进入源目录再压缩，以避免包含父文件夹
+            pushd $SOURCE_DIR
+            7z a "../../$DEST_ARCHIVE_PATH" "${{ matrix.source_name }}"
+            popd
           else
-            tar -czf "$DEST_ARCHIVE" -C "target/${{ matrix.target }}/release" "${{ matrix.source_name }}"
+            # 对于 Linux/macOS (tar), 可以使用 -C 参数指定源目录，非常方便
+            tar -czf "$DEST_ARCHIVE_PATH" -C "$SOURCE_DIR" "${{ matrix.source_name }}"
           fi
 
       - name: Release
