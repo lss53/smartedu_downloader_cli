@@ -40,13 +40,14 @@
 
 1.  访问最新的 Release 页面。
 2.  根据您的操作系统，下载对应的文件：
-    -   Windows: `smartedu_downloader-windows-x64.exe`
-    -   macOS: `smartedu_downloader-macos-x64`
-    -   Linux: `smartedu_downloader-linux-x64`
+    -   Windows: `sed-dl_x.x.x_Windows_x64.zip`
+    -   macOS: `sed-dl_x.x.x_macOS_x64.tar.gz`
+    -   Linux: `sed-dl_x.x.x_Linux_x64.tar.gz`
 3.  (macOS/Linux 用户) 下载后，请先赋予文件可执行权限：
     ```bash
-    chmod +x ./smartedu_downloader-macos-x64
+    chmod +x ./sed-dl
     ```
+
 
 ### 2. 准备 Access Token
 
@@ -62,10 +63,10 @@
 
 ```bash
 # 通过 URL
-./smartedu_downloader -u "https://basic.smartedu.cn/tchMaterial/detail?contentId=..."
+./sed-dl -u "https://basic.smartedu.cn/tchMaterial/detail?contentId=..."
 
 # 通过 Content ID
-./smartedu_downloader -c "教材的Content-ID"
+./sed-dl -c "教材的Content-ID"
 ```
 
 #### 批量下载 (推荐)
@@ -79,12 +80,12 @@
 3.  运行命令，并指定输出目录：
     ```bash
     # 下载到名为 "教材下载" 的文件夹中
-    ./smartedu_downloader -i urls.txt -o ./教材下载/
+    ./sed-dl -i urls.txt -o ./教材下载/
     ```
 
 #### 查看所有选项
 ```bash
-./smartedu_downloader --help
+./sed-dl --help
 ```
 
 ## 🛠️ 从源码编译 (适合开发者)
@@ -101,7 +102,7 @@ cargo build --release
 
 # 3. 运行
 # 编译后的可执行文件位于 ./target/release/ 目录下
-./target/release/smartedu_downloader --help
+./target/release/sed-dl --help
 ```
 
 ## 🤝 贡献
