@@ -108,7 +108,7 @@ struct TechInfoItem {
 #[command(
     name = "sed-dl",
     author = "ds",
-    version = "1.0",
+    version = "0.1.0",
     about = "国家中小学智慧教育平台教材下载命令行工具 (Rust版)",
     long_about = None,
     after_help = "示例:\n  # 下载单个URL\n  sed-dl -u \"<教材URL>\" -t \"<你的TOKEN>\"\n\n  # 从文件批量下载并指定输出目录\n  sed-dl -i urls.txt -o ./教材下载 -t \"<你的TOKEN>\""
