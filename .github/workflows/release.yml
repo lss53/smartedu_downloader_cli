@@ -89,7 +89,7 @@ jobs:
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             # 对于 Windows (7z), 我们需要先进入源目录再压缩，以避免包含父文件夹
             pushd $SOURCE_DIR
-            7z a "../../$DEST_ARCHIVE_PATH" "${{ matrix.source_name }}"
+            7z a "../../../$DEST_ARCHIVE_PATH" "${{ matrix.source_name }}"
             popd
           else
             # 对于 Linux/macOS (tar), 可以使用 -C 参数指定源目录，非常方便
