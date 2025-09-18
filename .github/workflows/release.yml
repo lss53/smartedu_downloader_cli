@@ -90,38 +90,22 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo install cross --git https://github.com/cross-rs/cross --branch main
 
-      - name: Install build dependencies for x86_64-musl (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Cache aarch64-musl toolchain
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        id: cache-musl-toolchain
-        uses: actions/cache@v4
-        with:
-          path: aarch64-linux-musl-cross
-          key: ${{ runner.os }}-musl-toolchain-aarch64-v1
-
-      - name: Download and install aarch64-musl toolchain (if not cached)
-        if: matrix.target == 'aarch64-unknown-linux-musl' && steps.cache-musl-toolchain.outputs.cache-hit != 'true'
+      - name: Install Linux MUSL dependencies
+        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
         run: |
-          set -e
-          TOOLCHAIN_URL="https://musl.cc/aarch64-linux-musl-cross.tgz"
-          echo "Cache miss. Downloading toolchain from $TOOLCHAIN_URL"
-          curl -L --retry 3 --retry-delay 5 -o aarch64-linux-musl-cross.tgz "$TOOLCHAIN_URL"
-          tar -xzf aarch64-linux-musl-cross.tgz
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-musl
+          fi
 
-      - name: Add aarch64-musl toolchain to PATH
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: echo "$(pwd)/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
-
-      - name: Configure musl linker for x86_64-musl (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Configure MUSL linker for Linux
+        if: runner.os == 'Linux' && contains(matrix.target, 'musl')
         run: |
           mkdir -p .cargo
           cat << EOF > .cargo/config.toml
-          [target.x86_64-unknown-linux-musl]
-          linker = "x86_64-linux-musl-gcc"
+          [target.${{ matrix.target }}]
+          linker = "${{ matrix.target }}-gcc"
           rustflags = ["-C", "target-feature=+crt-static"]
           EOF
 
@@ -151,7 +135,7 @@ jobs:
           echo "source_name=$SOURCE_NAME" >> $GITHUB_OUTPUT
           SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME"
           echo "source_path=$SOURCE_PATH" >> $GITHUB_OUTPUT
-          
+
           echo "Stripping binary..."
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
