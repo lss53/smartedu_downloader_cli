@@ -129,10 +129,8 @@ jobs:
           echo "Stripping binary..."
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-              # 使用交叉编译工具链中的 strip
               aarch64-linux-musl-strip "$SOURCE_PATH"
             else
-              # 使用系统原生的 strip
               strip "$SOURCE_PATH"
             fi
           fi
