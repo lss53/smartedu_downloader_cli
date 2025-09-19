@@ -104,7 +104,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install cross-compilation tool (cross)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: which cross || cargo install cross # 使用 which 命令检查
+        run: cargo install cross --force
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools binutils-aarch64-linux-gnu
@@ -147,30 +147,31 @@ jobs:
           path: ${{ steps.package.outputs.archive_name }}
 
   upload-assets:
-    name: Upload Assets and Checksum
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Download all release assets
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          pattern: release-asset-*
-          merge-multiple: true
-      - name: Generate checksums file
-        run: |
-          cd release-assets
-          sha256sum * > ../checksums.txt
-          echo "Generated checksums.txt:"
-          cat ../checksums.txt
-      - name: Upload all assets and checksums to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-assets/*
-            checksums.txt
+      name: Upload Assets and Checksum
+      needs: [create-release, build]
+      runs-on: ubuntu-24.04
+      permissions:
+        contents: write
+      steps:
+        - name: Download all release assets
+          uses: actions/download-artifact@v4
+          with:
+            path: release-assets
+            pattern: release-asset-*
+            merge-multiple: true
+        - name: Generate checksums file
+          run: |
+            cd release-assets
+            CHECKSUMS_FILE="${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt"
+            sha256sum * > ../${CHECKSUMS_FILE}
+            echo "Generated ${CHECKSUMS_FILE}:"
+            cat ../${CHECKSUMS_FILE}
+        - name: Upload all assets and checksums to Release
+          uses: softprops/action-gh-release@v2
+          with:
+            files: |
+              release-assets/*
+              ${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt
 
   publish-release:
     name: Publish Release
