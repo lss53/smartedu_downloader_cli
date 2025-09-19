@@ -1,0 +1,10 @@
+# .cargo/config.toml
+
+# Linker configuration for building for x86_64 MUSL on a standard Linux runner.
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Linker configuration used by cross-rs inside its Docker container for aarch64 MUSL.
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"

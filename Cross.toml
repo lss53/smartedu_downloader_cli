@@ -1,0 +1,7 @@
+# Cross.toml
+
+# Specify a modern Docker image for aarch64-musl cross-compilation.
+# This image contains a newer GLIBC version, which fixes the build failure
+# with recent versions of certain crates like `libc`.
+[target.aarch64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:main"

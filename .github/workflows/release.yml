@@ -42,7 +42,7 @@ jobs:
           generate_release_notes: true
 
   build-and-upload:
-    name: Build and Upload Artifacts
+    name: Build and Upload Artifacts (${{ matrix.target }}, ${{ matrix.os }}, ${{ matrix.os_name }}, ${{ matrix.arch }})
     needs: create-release
     strategy:
       fail-fast: false
@@ -88,23 +88,14 @@ jobs:
 
       - name: Install cross-compilation tool (cross)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo install cross --git https://github.com/cross-rs/cross --branch main
+        run: cargo install cross
 
       - name: Install build dependencies (Linux)
+        # For native x86_64-musl build and for aarch64-linux-gnu-strip
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools binutils-aarch64-linux-gnu
-
-      - name: Configure musl linker for x86_64-musl (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          mkdir -p .cargo
-          cat << EOF > .cargo/config.toml
-          [target.x86_64-unknown-linux-musl]
-          linker = "x86_64-linux-musl-gcc"
-          rustflags = ["-C", "target-feature=+crt-static"]
-          EOF
 
       - name: Run tests
         shell: bash
@@ -132,7 +123,7 @@ jobs:
           echo "source_name=$SOURCE_NAME" >> $GITHUB_OUTPUT
           SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME"
           echo "source_path=$SOURCE_PATH" >> $GITHUB_OUTPUT
-          
+
           echo "Stripping binary..."
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
@@ -152,14 +143,14 @@ jobs:
           SOURCE_PATH="${{ steps.prep_binary.outputs.source_path }}"
           DEST_ARCHIVE_NAME="${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
           DEST_ARCHIVE_PATH="${{ env.ARTIFACT_DIR }}/$DEST_ARCHIVE_NAME"
-          
+
           echo "Packaging $SOURCE_NAME for ${{ matrix.os_name }}..."
           if [[ "${{ matrix.ext }}" == ".zip" ]]; then
             tar -acf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           else
             tar -czf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           fi
-          
+
           echo "Generating checksum..."
           cd ${{ env.ARTIFACT_DIR }}
           sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha256"
