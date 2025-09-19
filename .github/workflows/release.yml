@@ -17,7 +17,7 @@ permissions:
 jobs:
   create-release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # <-- 修改这里
     permissions:
       contents: write
       pull-requests: read
@@ -42,7 +42,7 @@ jobs:
           generate_release_notes: true
 
   build-and-upload:
-    name: Build and Upload Artifacts (${{ matrix.target }}, ${{ matrix.os }}, ${{ matrix.os_name }}, ${{ matrix.arch }})
+    name: Build and Upload Artifacts (${{ matrix.target }})
     needs: create-release
     strategy:
       fail-fast: false
@@ -50,9 +50,9 @@ jobs:
         include:
           - { target: x86_64-pc-windows-msvc, os: windows-latest, os_name: Windows, arch: x64, ext: .zip }
           - { target: x86_64-apple-darwin, os: macos-latest, os_name: macOS, arch: x64, ext: .tar.gz }
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, os_name: Linux, arch: x64, ext: .tar.gz }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, os_name: Linux, arch: x64, ext: .tar.gz } # <-- 修改这里
           - { target: aarch64-apple-darwin, os: macos-latest, os_name: macOS, arch: arm64, ext: .tar.gz }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, os_name: Linux, arch: arm64, ext: .tar.gz }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, os_name: Linux, arch: arm64, ext: .tar.gz } # <-- 修改这里
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -91,7 +91,6 @@ jobs:
         run: cargo install cross
 
       - name: Install build dependencies (Linux)
-        # For native x86_64-musl build and for aarch64-linux-gnu-strip
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -153,7 +152,7 @@ jobs:
 
           echo "Generating checksum..."
           cd ${{ env.ARTIFACT_DIR }}
-          sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha256"
+          sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha26"
           cd ..
 
       - name: Upload Release Assets
@@ -166,7 +165,7 @@ jobs:
   publish-release:
     name: Publish Release
     needs: [create-release, build-and-upload]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # <-- 修改这里
     permissions:
       contents: write
     steps:
