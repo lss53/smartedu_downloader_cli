@@ -74,11 +74,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target/
-          # --- 这是关键的修改 ---
-          # 增加了一个 'v2' 版本号来使旧缓存失效
-          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-v2-
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
 
       - name: Show cache status
         run: 'echo "Cache hit: ${{ steps.cargo-cache.outputs.cache-hit }}"'
@@ -164,7 +162,7 @@ jobs:
           
           echo "Generating checksum..."
           cd ${{ env.ARTIFACT_DIR }}
-          sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha26"
+          sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha256"
           cd ..
 
       - name: Upload Release Assets
