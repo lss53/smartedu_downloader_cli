@@ -42,7 +42,7 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          name: ${{ github.ref_name }}  # 直接使用标签名，移除 "Release " 前缀
           draft: true
           generate_release_notes: true
 
@@ -104,10 +104,13 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install cross-compilation tool (cross)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo install cross --force
+        run: cargo install cross --force  # 添加 --force 标志解决已存在冲突
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools binutils-aarch64-linux-gnu
+      - name: Install zip tool (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install zip -y  # 确保 Windows 环境有 zip 工具
       - name: Build and Test
         shell: bash
         run: |
@@ -135,7 +138,8 @@ jobs:
           DEST_ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
           
           if [[ "${{ matrix.ext }}" == ".zip" ]]; then
-            tar -acf "$DEST_ARCHIVE_NAME" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
+            # 使用 zip 命令创建标准 ZIP 压缩包
+            zip -j "$DEST_ARCHIVE_NAME" "$SOURCE_PATH"
           else
             tar -czf "$DEST_ARCHIVE_NAME" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           fi
@@ -147,31 +151,32 @@ jobs:
           path: ${{ steps.package.outputs.archive_name }}
 
   upload-assets:
-      name: Upload Assets and Checksum
-      needs: [create-release, build]
-      runs-on: ubuntu-24.04
-      permissions:
-        contents: write
-      steps:
-        - name: Download all release assets
-          uses: actions/download-artifact@v4
-          with:
-            path: release-assets
-            pattern: release-asset-*
-            merge-multiple: true
-        - name: Generate checksums file
-          run: |
-            cd release-assets
-            CHECKSUMS_FILE="${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt"
-            sha256sum * > ../${CHECKSUMS_FILE}
-            echo "Generated ${CHECKSUMS_FILE}:"
-            cat ../${CHECKSUMS_FILE}
-        - name: Upload all assets and checksums to Release
-          uses: softprops/action-gh-release@v2
-          with:
-            files: |
-              release-assets/*
-              ${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt
+    name: Upload Assets and Checksum
+    needs: [create-release, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-asset-*
+          merge-multiple: true
+      - name: Generate checksums file
+        run: |
+          cd release-assets
+          # 使用程序名称和版本号作为校验和文件前缀
+          CHECKSUMS_FILE="${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt"
+          sha256sum * > ../${CHECKSUMS_FILE}
+          echo "Generated ${CHECKSUMS_FILE}:"
+          cat ../${CHECKSUMS_FILE}
+      - name: Upload all assets and checksums to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/*
+            ${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt
 
   publish-release:
     name: Publish Release
