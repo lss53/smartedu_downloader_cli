@@ -4,9 +4,10 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*' # 支持 pre-release 版本，例如 v1.0.0-alpha.1
   workflow_dispatch:
 
+# 当新的工作流在同一分支或标签上启动时，取消正在进行的旧工作流
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
@@ -15,11 +16,14 @@ permissions:
   contents: read
 
 jobs:
+  # ----------------------------------------------------------------
+  # Job 1: 准备发布环境，创建草稿 Release
+  # ----------------------------------------------------------------
   create-release:
     name: Prepare Release
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: write # 需要写权限来创建 Release
     outputs:
       binary_name: ${{ steps.extract_vars.outputs.binary_name }}
       version: ${{ steps.extract_vars.outputs.version }}
@@ -30,11 +34,11 @@ jobs:
       - name: Extract Release Variables
         id: extract_vars
         run: |
-          # 从 Cargo.toml 动态获取名称
+          # 从 Cargo.toml 动态获取二进制文件名，这是稳健的做法
           BINARY_NAME=$(grep '^name =' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
           echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
 
-          # 统一提取版本号
+          # 从标签名中提取版本号 (移除 'v' 前缀)
           VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -42,10 +46,13 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}  # 直接使用标签名，移除 "Release " 前缀
+          # action-gh-release 默认使用标签名作为发布标题，无需显式设置 `name`
           draft: true
           generate_release_notes: true
 
+  # ----------------------------------------------------------------
+  # Job 2: 在多个平台上并行构建二进制文件
+  # ----------------------------------------------------------------
   build:
     name: Build Artifact (${{ matrix.target }})
     needs: create-release
@@ -53,13 +60,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 在 Matrix 中定义 strip 命令
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             os_name: Windows
             arch: x64
             ext: .zip
-            strip_cmd: ""
+            strip_cmd: "" # Windows msvc target 不需要 strip
           - target: x86_64-apple-darwin
             os: macos-latest
             os_name: macOS
@@ -68,7 +74,7 @@ jobs:
             strip_cmd: strip
           - target: x86_64-unknown-linux-musl
             os: ubuntu-24.04
-            os_name: Linux
+            os_name: Linux-musl
             arch: x64
             ext: .tar.gz
             strip_cmd: strip
@@ -80,14 +86,16 @@ jobs:
             strip_cmd: strip
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04
-            os_name: Linux
+            os_name: Linux-musl
             arch: arm64
             ext: .tar.gz
             strip_cmd: aarch64-linux-gnu-strip
+
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Cache Rust dependencies
         uses: actions/cache@v4
         with:
@@ -96,66 +104,81 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          # 优化缓存：不再缓存 `target` 目录，以减小缓存大小并避免潜在冲突
+          key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-${{ matrix.target }}-
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
       - name: Install cross-compilation tool (cross)
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo install cross --force  # 添加 --force 标志解决已存在冲突
+        if: contains(matrix.target, 'unknown-linux-musl')
+        run: cargo install cross --force
+
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools binutils-aarch64-linux-gnu
-      - name: Install zip tool (Windows)
-        if: matrix.os == 'windows-latest'
-        run: choco install zip -y  # 确保 Windows 环境有 zip 工具
+
       - name: Build and Test
         shell: bash
         run: |
-          # 使用变量切换构建命令
           BUILD_CMD="cargo"
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+          if [[ "${{ matrix.target }}" == *"-musl"* ]]; then
             BUILD_CMD="cross"
           fi
           $BUILD_CMD test --release --target ${{ matrix.target }} --locked
           $BUILD_CMD build --release --target ${{ matrix.target }} --locked
+
       - name: Package artifact
         id: package
         shell: bash
         run: |
           BINARY_NAME="${{ needs.create-release.outputs.binary_name }}"
           VERSION="${{ needs.create-release.outputs.version }}"
-          SOURCE_NAME=$( if [[ "${{ matrix.os }}" == "windows-latest" ]]; then echo "$BINARY_NAME.exe"; else echo "$BINARY_NAME"; fi )
-          SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME"
           
+          # 根据操作系统确定可执行文件名 (Windows 带 .exe)
+          SOURCE_NAME_EXE="$BINARY_NAME"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            SOURCE_NAME_EXE="$BINARY_NAME.exe"
+          fi
+          SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME_EXE"
+          
+          # 如果定义了 strip 命令，则执行以减小二进制文件大小
           if [[ -n "${{ matrix.strip_cmd }}" ]]; then
-            echo "Stripping binary with: ${{ matrix.strip_cmd }}"
+            echo "Stripping binary with command: ${{ matrix.strip_cmd }}"
             ${{ matrix.strip_cmd }} "$SOURCE_PATH"
           fi
           
-          DEST_ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
+          # 定义最终的压缩包名称
+          DEST_ARCHIVE_NAME="${BINARY_NAME}_v${VERSION}_${{ matrix.target }}${{ matrix.ext }}"
           
+          # 使用系统原生工具进行压缩，无需安装 choco
           if [[ "${{ matrix.ext }}" == ".zip" ]]; then
-            # 使用 zip 命令创建标准 ZIP 压缩包
-            zip -j "$DEST_ARCHIVE_NAME" "$SOURCE_PATH"
+            powershell -Command "Compress-Archive -Path '$SOURCE_PATH' -DestinationPath '$DEST_ARCHIVE_NAME' -Force"
           else
-            tar -czf "$DEST_ARCHIVE_NAME" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
+            tar -czf "$DEST_ARCHIVE_NAME" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME_EXE"
           fi
+          
           echo "archive_name=$DEST_ARCHIVE_NAME" >> $GITHUB_OUTPUT
+
       - name: Upload artifact for release
         uses: actions/upload-artifact@v4
         with:
           name: release-asset-${{ matrix.target }}
           path: ${{ steps.package.outputs.archive_name }}
 
+  # ----------------------------------------------------------------
+  # Job 3: 收集所有构建产物，生成校验和，并上传到草稿 Release
+  # ----------------------------------------------------------------
   upload-assets:
     name: Upload Assets and Checksum
     needs: [create-release, build]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: write # 需要写权限来上传文件到 Release
     steps:
       - name: Download all release assets
         uses: actions/download-artifact@v4
@@ -163,29 +186,38 @@ jobs:
           path: release-assets
           pattern: release-asset-*
           merge-multiple: true
+
       - name: Generate checksums file
         run: |
           cd release-assets
-          # 使用程序名称和版本号作为校验和文件前缀
           CHECKSUMS_FILE="${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt"
           sha256sum * > ../${CHECKSUMS_FILE}
-          echo "Generated ${CHECKSUMS_FILE}:"
+          echo "Generated checksums file:"
           cat ../${CHECKSUMS_FILE}
+
       - name: Upload all assets and checksums to Release
         uses: softprops/action-gh-release@v2
         with:
+          # 通过 tag_name 精准定位，防止操作错误的 Release
+          tag_name: ${{ github.ref_name }}
           files: |
             release-assets/*
             ${{ needs.create-release.outputs.binary_name }}_${{ needs.create-release.outputs.version }}_checksums.txt
 
+  # ----------------------------------------------------------------
+  # Job 4: 将草稿 Release 设为正式发布
+  # ----------------------------------------------------------------
   publish-release:
     name: Publish Release
     needs: [create-release, upload-assets]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: write # 需要写权限来编辑 Release
+    if: success() # 确保所有上游 Job 都成功时才执行
     steps:
       - name: Publish the Release
         uses: softprops/action-gh-release@v2
         with:
+          # 通过 tag_name 精准定位
+          tag_name: ${{ github.ref_name }}
           draft: false
