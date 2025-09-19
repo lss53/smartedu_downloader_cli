@@ -17,7 +17,7 @@ permissions:
 jobs:
   create-release:
     name: Create Release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: read
@@ -41,18 +41,18 @@ jobs:
           draft: true
           generate_release_notes: true
 
-  build-and-upload:
+build-and-upload:
     name: Build and Upload Artifacts
     needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-pc-windows-msvc, os: windows-2022, os_name: Windows, arch: x64, ext: .zip } # 明确版本
-          - { target: x86_64-apple-darwin, os: macos-12, os_name: macOS, arch: x64, ext: .tar.gz } # 明确版本
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, os_name: Linux, arch: x64, ext: .tar.gz } # 明确版本
-          - { target: aarch64-apple-darwin, os: macos-12, os_name: macOS, arch: arm64, ext: .tar.gz } # 明确版本
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04, os_name: Linux, arch: arm64, ext: .tar.gz } # 明确版本
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, os_name: Windows, arch: x64, ext: .zip }
+          - { target: x86_64-apple-darwin, os: macos-latest, os_name: macOS, arch: x64, ext: .tar.gz }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, os_name: Linux, arch: x64, ext: .tar.gz }
+          - { target: aarch64-apple-darwin, os: macos-latest, os_name: macOS, arch: arm64, ext: .tar.gz }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, os_name: Linux, arch: arm64, ext: .tar.gz }
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -78,6 +78,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Show cache status
+        run: 'echo "Cache hit: ${{ steps.cargo-cache.outputs.cache-hit }}"'
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -87,35 +90,20 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo install cross --git https://github.com/cross-rs/cross --branch main
 
-      - name: Install Linux MUSL dependencies
-        if: runner.os == 'ubuntu-22.04' && contains(matrix.target, 'musl')
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-          fi
+          sudo apt-get install -y musl-tools binutils-aarch64-linux-gnu
 
-      - name: Configure MUSL linker for Linux
-        if: runner.os == 'ubuntu-22.04' && contains(matrix.target, 'musl')
+      - name: Configure musl linker for x86_64-musl (Linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           mkdir -p .cargo
-          LINKER_NAME="musl-gcc"
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            LINKER_NAME="aarch64-linux-musl-gcc"
-          fi
           cat << EOF > .cargo/config.toml
-          [target.${{ matrix.target }}]
-          linker = "$LINKER_NAME"
+          [target.x86_64-unknown-linux-musl]
+          linker = "x86_64-linux-musl-gcc"
           rustflags = ["-C", "target-feature=+crt-static"]
-          EOF
-
-      - name: Configure Cross-compilation Environment
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: |
-          cat << EOF > Cross.toml
-          [target.aarch64-unknown-linux-musl]
-          image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:0.2.5"
           EOF
 
       - name: Run tests
@@ -140,17 +128,18 @@ jobs:
         id: prep_binary
         shell: bash
         run: |
-          SOURCE_NAME=$( if [[ "${{ matrix.os }}" == "windows-2022" ]]; then echo "${{ env.BINARY_NAME }}.exe"; else echo "${{ env.BINARY_NAME }}"; fi )
+          SOURCE_NAME=$( if [[ "${{ matrix.os }}" == "windows-latest" ]]; then echo "${{ env.BINARY_NAME }}.exe"; else echo "${{ env.BINARY_NAME }}"; fi )
           echo "source_name=$SOURCE_NAME" >> $GITHUB_OUTPUT
           SOURCE_PATH="target/${{ matrix.target }}/release/$SOURCE_NAME"
           echo "source_path=$SOURCE_PATH" >> $GITHUB_OUTPUT
+          
           echo "Stripping binary..."
-          if [[ "${{ matrix.os }}" != "windows-2022" ]]; then
-            STRIP_COMMAND="strip"
+          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-              STRIP_COMMAND="aarch64-linux-musl-strip"
+              aarch64-linux-gnu-strip "$SOURCE_PATH"
+            else
+              strip "$SOURCE_PATH"
             fi
-            "$STRIP_COMMAND" "$SOURCE_PATH"
           fi
 
       - name: Package artifact and generate checksum
@@ -163,11 +152,15 @@ jobs:
           SOURCE_PATH="${{ steps.prep_binary.outputs.source_path }}"
           DEST_ARCHIVE_NAME="${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.os_name }}_${{ matrix.arch }}${{ matrix.ext }}"
           DEST_ARCHIVE_PATH="${{ env.ARTIFACT_DIR }}/$DEST_ARCHIVE_NAME"
+          
+          echo "Packaging $SOURCE_NAME for ${{ matrix.os_name }}..."
           if [[ "${{ matrix.ext }}" == ".zip" ]]; then
             tar -acf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           else
             tar -czf "$DEST_ARCHIVE_PATH" -C "$(dirname "$SOURCE_PATH")" "$SOURCE_NAME"
           fi
+          
+          echo "Generating checksum..."
           cd ${{ env.ARTIFACT_DIR }}
           sha256sum "$DEST_ARCHIVE_NAME" > "${DEST_ARCHIVE_NAME}.sha256"
           cd ..
@@ -182,7 +175,7 @@ jobs:
   publish-release:
     name: Publish Release
     needs: [create-release, build-and-upload]
-    runs-on: ubuntu-22.04 # 【采纳建议】: 明确版本
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
